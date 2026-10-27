@@ -26,10 +26,11 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
+    "optuna>=3.0",
 ]
-darwinian = [
-    "darwinian-evolver",
-]
+# darwinian extra removed locally: `darwinian-evolver` is not published on PyPI
+# (Phase 4, AGPL external CLI only) and its presence breaks `uv` resolution for
+# EVERY sync/run, even with only the dev extra requested.
 
 [project.urls]
 Homepage = "https://github.com/NousResearch/hermes-agent-self-evolution"

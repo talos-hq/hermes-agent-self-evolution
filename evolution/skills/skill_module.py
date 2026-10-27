@@ -82,35 +82,42 @@ def find_skill(skill_name: str, hermes_agent_path: Path) -> Optional[Path]:
 
 
 class SkillModule(dspy.Module):
-    """A DSPy module that wraps a skill file for optimization.
+    """A DSPy module whose optimizable instruction IS the skill text.
 
-    The skill text (body) is the parameter that GEPA optimizes.
-    On each forward pass, the module:
-    1. Uses the skill text as instructions
-    2. Processes the task input
-    3. Returns the agent's response
+    dspy's instruction optimizers (GEPA, MIPROv2) mutate
+    ``predictor.signature.instructions`` — they never touch *input field
+    values*. So the skill text must be installed as the instruction; then an
+    optimizer run yields a genuinely new skill body, read back via the
+    ``skill_text`` property. (The upstream version passed the skill text as an
+    input field and read back a plain attribute no optimizer ever changed,
+    which is why an "evolved" skill was always identical to the baseline.)
     """
 
     class TaskWithSkill(dspy.Signature):
-        """Complete a task following the provided skill instructions.
+        """Complete the task by carefully following the skill instructions given
+        to you. Those instructions describe the procedure to apply."""
 
-        You are an AI agent following specific skill instructions to complete a task.
-        Read the skill instructions carefully and follow the procedure described.
-        """
-        skill_instructions: str = dspy.InputField(desc="The skill instructions to follow")
         task_input: str = dspy.InputField(desc="The task to complete")
-        output: str = dspy.OutputField(desc="Your response following the skill instructions")
+        output: str = dspy.OutputField(
+            desc="Your response, produced by following the skill instructions"
+        )
 
     def __init__(self, skill_text: str):
         super().__init__()
-        self.skill_text = skill_text
-        self.predictor = dspy.ChainOfThought(self.TaskWithSkill)
+        # dspy.Predict exposes `.signature` (a Signature class) directly, which
+        # is the object GEPA/MIPROv2 rewrite via `.with_instructions(...)`.
+        # (ChainOfThought wraps an inner predictor and hides `.signature`, so it
+        # cannot be used as the optimizable component here.)
+        signature = self.TaskWithSkill.with_instructions(skill_text)
+        self.predictor = dspy.Predict(signature)
+
+    @property
+    def skill_text(self) -> str:
+        """The current (possibly evolved) skill text = the predictor instruction."""
+        return self.predictor.signature.instructions
 
     def forward(self, task_input: str) -> dspy.Prediction:
-        result = self.predictor(
-            skill_instructions=self.skill_text,
-            task_input=task_input,
-        )
+        result = self.predictor(task_input=task_input)
         return dspy.Prediction(output=result.output)
 
 
