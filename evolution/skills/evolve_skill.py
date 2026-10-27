@@ -33,6 +33,7 @@ from evolution.skills.skill_module import (
     find_skill,
     reassemble_skill,
 )
+from evolution.skills.preserving_proposer import SkillPreservingProposer
 
 console = Console()
 
@@ -59,6 +60,7 @@ def evolve(
     mock: bool = False,
     max_skill_size: int = 15_000,
     dataset_size: Optional[int] = None,
+    preserving_proposer: bool = True,
 ):
     """Main evolution function — orchestrates the full optimization loop."""
 
@@ -160,6 +162,7 @@ def evolve(
 
     start_time = time.time()
     optimizer_name = "mock"
+    proposer_name = "n/a"
     lm = None
 
     if mock:
@@ -173,17 +176,28 @@ def evolve(
         console.print(f"  Optimizer: GEPA (max_full_evals={iterations})")
         console.print(f"  Optimizer model: {optimizer_model}")
         console.print(f"  Eval model: {eval_model}")
+        proposer_name = "preserving" if preserving_proposer else "generic"
+        console.print(f"  Instruction proposer: {proposer_name}")
 
         # ── 5. Run optimization ─────────────────────────────────────────
         console.print(f"\n[bold cyan]Running GEPA optimization ({iterations} iterations)...[/bold cyan]\n")
+        # Unique per-run dir: GEPA RESUMES from a log_dir it has seen before,
+        # which would silently replay an earlier run's candidate instead of
+        # optimizing (observed: 0 rollouts, stale evolved text).
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        gepa_kwargs: dict = dict(
+            metric=_gepa_metric,
+            max_full_evals=iterations,
+            reflection_lm=reflection_lm,
+            track_stats=True,
+            log_dir=str(Path("logs") / "gepa" / f"{skill_name}-{run_id}"),
+        )
+        if preserving_proposer:
+            # dspy's default proposer writes a short generic instruction and
+            # destroys long skill documents; this one edits in place.
+            gepa_kwargs["instruction_proposer"] = SkillPreservingProposer()
         try:
-            optimizer = dspy.GEPA(
-                metric=_gepa_metric,
-                max_full_evals=iterations,
-                reflection_lm=reflection_lm,
-                track_stats=True,
-                log_dir=str(Path("logs") / "gepa"),
-            )
+            optimizer = dspy.GEPA(**gepa_kwargs)
             optimizer_name = "gepa"
             optimized_module = optimizer.compile(baseline_module, trainset=trainset, valset=valset)
         except Exception as e:
@@ -291,6 +305,7 @@ def evolve(
         "timestamp": timestamp,
         "mode": "mock" if mock else "real",
         "optimizer": optimizer_name,
+        "proposer": proposer_name,
         "iterations": iterations,
         "optimizer_model": optimizer_model,
         "eval_model": eval_model,
@@ -343,8 +358,11 @@ def evolve(
 @click.option("--mock", is_flag=True, help="Zero-cost run: mock dataset + mock optimizer, no API calls")
 @click.option("--max-skill-size", default=15_000, help="Hard size limit for a skill body (chars)")
 @click.option("--dataset-size", default=None, type=int, help="Number of eval examples to build")
+@click.option("--generic-proposer", is_flag=True,
+              help="Use dspy's default (short-instruction) proposer instead of the "
+                   "preservation-aware one. Default is preservation-aware.")
 def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_model, hermes_repo,
-         run_tests, dry_run, mock, max_skill_size, dataset_size):
+         run_tests, dry_run, mock, max_skill_size, dataset_size, generic_proposer):
     """Evolve a Hermes Agent skill using DSPy + GEPA optimization."""
     evolve(
         skill_name=skill,
@@ -359,6 +377,7 @@ def main(skill, iterations, eval_source, dataset_path, optimizer_model, eval_mod
         mock=mock,
         max_skill_size=max_skill_size,
         dataset_size=dataset_size,
+        preserving_proposer=not generic_proposer,
     )
 
 
