@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Print the next skill in rotation.txt and advance the persistent index.
+# Rotation pointer for rotation.txt.
+#   next-skill.sh            -> print the CURRENT skill (peek; does NOT advance)
+#   next-skill.sh --commit   -> advance to the next skill (no output)
 # State lives in .rotation_state (an integer); wraps around automatically.
+#
+# Peek-then-commit lets the caller advance the rotation ONLY after a run
+# actually succeeded, so a failed week is retried instead of skipped.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,5 +26,15 @@ if [ -f "$STATE" ]; then
 fi
 idx=$(( idx % n ))
 
-echo "${skills[$idx]}"
-echo $(( (idx + 1) % n )) > "$STATE"
+case "${1:-}" in
+  ""|--peek)
+    echo "${skills[$idx]}"
+    ;;
+  --commit)
+    echo $(( (idx + 1) % n )) > "$STATE"
+    ;;
+  *)
+    echo "usage: next-skill.sh [--peek|--commit]" >&2
+    exit 2
+    ;;
+esac
