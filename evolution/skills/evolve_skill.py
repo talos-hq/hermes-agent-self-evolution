@@ -181,6 +181,8 @@ def evolve(
                 metric=_gepa_metric,
                 max_full_evals=iterations,
                 reflection_lm=reflection_lm,
+                track_stats=True,
+                log_dir=str(Path("logs") / "gepa"),
             )
             optimizer_name = "gepa"
             optimized_module = optimizer.compile(baseline_module, trainset=trainset, valset=valset)
@@ -216,6 +218,20 @@ def evolve(
         console.print(f"  [{color}]{icon} {c.constraint_name}[/{color}]: {c.message}{note}")
         if not ok:
             hard_failures.append(c.constraint_name)
+    # Destructive-shrink guard: GEPA's instruction proposer tends to rewrite
+    # toward a short generic instruction, which can gut a long skill document.
+    # A skill that loses most of its content is a regression even if the judge
+    # score moves, so treat heavy shrinkage as a hard failure.
+    shrink_floor = 0.70
+    shrink_ratio = len(evolved_body) / max(1, len(skill["body"]))
+    destructive = shrink_ratio < shrink_floor
+    if destructive:
+        console.print(
+            f"  [red]✗ content_shrink[/red]: {shrink_ratio:.0%} of baseline "
+            f"({len(evolved_body):,}/{len(skill['body']):,} chars) — below {shrink_floor:.0%} floor"
+        )
+        hard_failures.append("content_shrink")
+
     all_pass = not hard_failures
 
     # ── 8. Evaluate on holdout set ──────────────────────────────────────
@@ -224,16 +240,24 @@ def evolve(
 
     baseline_scores = []
     evolved_scores = []
+    scoring_errors = 0
     for ex in holdout_examples:
-        if mock:
-            baseline_out = mock_forward_text(baseline_module)
-            evolved_out = mock_forward_text(optimized_module)
-        else:
-            with dspy.context(lm=lm):
-                baseline_out = baseline_module(task_input=ex.task_input).output
-                evolved_out = optimized_module(task_input=ex.task_input).output
-        baseline_scores.append(skill_fitness_metric(ex, dspy.Prediction(output=baseline_out)))
-        evolved_scores.append(skill_fitness_metric(ex, dspy.Prediction(output=evolved_out)))
+        try:
+            if mock:
+                baseline_out = mock_forward_text(baseline_module)
+                evolved_out = mock_forward_text(optimized_module)
+            else:
+                with dspy.context(lm=lm):
+                    baseline_out = baseline_module(task_input=ex.task_input).output
+                    evolved_out = optimized_module(task_input=ex.task_input).output
+            baseline_scores.append(skill_fitness_metric(ex, dspy.Prediction(output=baseline_out)))
+            evolved_scores.append(skill_fitness_metric(ex, dspy.Prediction(output=evolved_out)))
+        except Exception as e:
+            # One malformed example must not kill the run — metrics still get written.
+            scoring_errors += 1
+            console.print(f"  [yellow]⚠ holdout example failed ({type(e).__name__}: {e})[/yellow]")
+            baseline_scores.append(0.0)
+            evolved_scores.append(0.0)
 
     avg_baseline = sum(baseline_scores) / max(1, len(baseline_scores))
     avg_evolved = sum(evolved_scores) / max(1, len(evolved_scores))
@@ -274,13 +298,17 @@ def evolve(
         "evolved_score": avg_evolved,
         "improvement": improvement,
         "changed": changed,
-        "deployed": bool(all_pass and changed),
+        "shrink_ratio": round(shrink_ratio, 3),
+        # "deployed" is only a RECOMMENDATION: constraints pass, content changed
+        # non-destructively, and the holdout score actually improved.
+        "deployed": bool(all_pass and changed and improvement > 0),
         "baseline_size": len(skill["body"]),
         "evolved_size": len(evolved_body),
         "train_examples": len(dataset.train),
         "val_examples": len(dataset.val),
         "holdout_examples": len(dataset.holdout),
         "elapsed_seconds": elapsed,
+        "scoring_errors": scoring_errors,
         "constraints_passed": all_pass,
         "constraint_failures": hard_failures,
         "constraints": [

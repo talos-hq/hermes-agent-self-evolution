@@ -146,14 +146,14 @@ class SyntheticDatasetBuilder:
 
         examples = [
             EvalExample(
-                task_input=c.get("task_input", ""),
-                expected_behavior=c.get("expected_behavior", ""),
-                difficulty=c.get("difficulty", "medium"),
-                category=c.get("category", "general"),
+                task_input=str(c.get("task_input") or ""),
+                expected_behavior=str(c.get("expected_behavior") or ""),
+                difficulty=str(c.get("difficulty") or "medium"),
+                category=str(c.get("category") or "general"),
                 source="synthetic",
             )
             for c in cases_raw
-            if c.get("task_input") and c.get("expected_behavior")
+            if isinstance(c, dict) and c.get("task_input") and c.get("expected_behavior")
         ]
 
         # Shuffle and split

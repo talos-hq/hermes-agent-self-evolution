@@ -135,6 +135,38 @@ def test_baseline_size_over_limit_is_not_gated(tmp_path, monkeypatch):
     assert metrics["constraints_passed"] is True, metrics["constraint_failures"]
 
 
+def test_destructive_shrink_is_blocked(tmp_path, monkeypatch):
+    """An optimizer that guts the skill must be rejected, not deployed."""
+    repo = _make_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    class ShrinkingOptimizer:
+        def compile(self, module, trainset=None, valset=None, **kwargs):
+            return SkillModule("tiny")
+
+    monkeypatch.setattr(evolve_skill, "MockOptimizer", ShrinkingOptimizer)
+    evolve(skill_name="sample-skill", iterations=1, hermes_repo=str(repo),
+           mock=True, dataset_size=6)
+
+    run = sorted((tmp_path / "output" / "sample-skill").iterdir())[-1]
+    m = json.loads((run / "metrics.json").read_text())
+    assert "content_shrink" in m["constraint_failures"]
+    assert m["constraints_passed"] is False
+    assert m["deployed"] is False
+
+
+def test_deployed_requires_positive_improvement(tmp_path, monkeypatch):
+    """No score improvement => not recommended for deployment."""
+    repo = _make_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    evolve(skill_name="sample-skill", iterations=1, hermes_repo=str(repo),
+           mock=True, dataset_size=6)
+    run = sorted((tmp_path / "output" / "sample-skill").iterdir())[-1]
+    m = json.loads((run / "metrics.json").read_text())
+    assert m["changed"] is True
+    assert m["deployed"] is False  # mock produces no real improvement
+
+
 # ── Unit checks on the pieces ──────────────────────────────────────────────
 
 def test_mock_dataset_split_sizes():

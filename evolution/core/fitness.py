@@ -110,10 +110,11 @@ def skill_fitness_metric(example: dspy.Example, prediction: dspy.Prediction, tra
     This is what gets passed to dspy.GEPA(metric=...).
     Returns a float 0-1 score.
     """
-    # The prediction should have an 'output' field with the agent's response
-    agent_output = getattr(prediction, "output", "") or ""
-    expected = getattr(example, "expected_behavior", "") or ""
-    task = getattr(example, "task_input", "") or ""
+    # Coerce to str: dataset sources are LLM-generated JSON and a malformed
+    # field (e.g. a nested object) must not crash the whole run.
+    agent_output = str(getattr(prediction, "output", "") or "")
+    expected = str(getattr(example, "expected_behavior", "") or "")
+    task = str(getattr(example, "task_input", "") or "")
 
     if not agent_output.strip():
         return 0.0
