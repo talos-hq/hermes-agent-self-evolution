@@ -1,0 +1,14 @@
+# Weekly skill-evolution rotation — one skill per tick, in order, wrapping around.
+# Blank lines and lines starting with '#' are ignored.
+# These are procedure/analysis skills that plausibly benefit from reflective
+# evolution and are safe to mutate (the run is review-only; nothing is applied).
+systematic-debugging
+codebase-inspection
+github-pr-workflow
+requesting-code-review
+test-driven-development
+obsidian
+dogfood
+simplify-code
+node-inspect-debugger
+python-debugpy

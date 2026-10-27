@@ -1,26 +1,28 @@
-__pycache__/
-*.py[cod]
+
 *$py.class
-*.egg-info/
-dist/
 build/
-.eggs/
-*.egg
-.venv/
-venv/
-.env
-
-# Generated eval datasets (local, not shared)
-datasets/**/*.jsonl
-datasets/**/*.json
 !datasets/.gitkeep
-
+datasets/**/*.json
+datasets/**/*.jsonl
+dist/
+*.egg
+*.egg-info/
+.eggs/
+.env
 # Evolution snapshots
-snapshots/
-*.pkl
-
+# Generated eval datasets (local, not shared)
 # IDE
 .idea/
-.vscode/
-*.swp
+# local integration
+logs/
+output/
+.overlay/
+*.pkl
+__pycache__/
+*.py[cod]
+snapshots/
 *.swo
+*.swp
+.venv/
+venv/
+.vscode/

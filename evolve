@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Hermes Agent Self-Evolution launcher.
+#
+# Wires the DSPy+GEPA skill-evolution tool to this box:
+#   * uv-managed env at ./  (no system / nix-global installs)
+#   * OpenRouter as the LLM provider (the direct DEEPSEEK_API_KEY is unfunded)
+#   * an auto-built "skills overlay" so EVERY skill is reachable — including the
+#     profile-local ones under ~/dev/hermes/skills AND the global external dir
+#     ~/.agents/skills. The tool only scans <repo>/skills, so we merge both trees
+#     into a generated overlay and point HERMES_AGENT_REPO at it.
+#
+# Usage:
+#   ./evolve --skill systematic-debugging --dry-run
+#   ./evolve --skill zach-adams-effect-clips --iterations 10
+#   ./evolve --skill songsee --eval-source synthetic
+#
+# Env overrides:
+#   HERMES_AGENT_REPO   use this repo's skills/ verbatim (skips the overlay)
+#   HERMES_ENV_FILE     .env to pull OPENROUTER_API_KEY from
+#   SE_OPTIMIZER_MODEL  GEPA reflection model   (default openrouter/deepseek/deepseek-chat)
+#   SE_EVAL_MODEL       judge / eval model      (default openrouter/deepseek/deepseek-chat)
+#   SE_OVERLAY          overlay parent dir      (default <repo>/.overlay)
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${HERMES_ENV_FILE:-/home/niteris/dev/hermes/profiles/hermeszach1/.env}"
+
+# Skill source trees, in precedence order (first wins on a name clash).
+SKILL_SOURCES=(
+  "/home/niteris/dev/hermes/skills"   # default-profile / live skills
+  "/home/niteris/.agents/skills"      # global external dir
+)
+
+if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -f "$ENV_FILE" ]; then
+  export OPENROUTER_API_KEY="$(grep -m1 '^OPENROUTER_API_KEY=' "$ENV_FILE" | cut -d= -f2-)"
+fi
+: "${OPENROUTER_API_KEY:?OPENROUTER_API_KEY not found — export it, or point HERMES_ENV_FILE at a .env that has it}"
+
+O="${SE_OPTIMIZER_MODEL:-openrouter/deepseek/deepseek-chat}"
+E="${SE_EVAL_MODEL:-openrouter/deepseek/deepseek-chat}"
+
+export PATH="$HOME/.venv/bin:$PATH"
+cd "$SELF_DIR"
+
+# ── Build the skills overlay (unless the caller pinned a repo) ─────────────
+if [ -n "${HERMES_AGENT_REPO:-}" ]; then
+  TARGET_REPO="$HERMES_AGENT_REPO"
+else
+  OV="${SE_OVERLAY:-$SELF_DIR/.overlay}"
+  if [ -d "$OV" ]; then chmod -R u+w "$OV" 2>/dev/null || true; rm -rf "$OV"; fi
+  mkdir -p "$OV/skills"
+  for src in "${SKILL_SOURCES[@]}"; do
+    [ -d "$src" ] || continue
+    for d in "$src"/*/; do
+      [ -d "$d" ] || continue
+      name="$(basename "$d")"
+      case "$name" in .*|index-cache) continue;; esac
+      mkdir -p "$OV/skills/$name"
+      cp -a "$d". "$OV/skills/$name/" 2>/dev/null || true
+    done
+  done
+  # Bundled skills ship 555/444; make the overlay fully writable so the next
+  # refresh can delete it and so nothing downstream trips on read-only files.
+  chmod -R u+w "$OV" 2>/dev/null || true
+  TARGET_REPO="$OV"
+fi
+
+exec uv run --project "$SELF_DIR" python -m evolution.skills.evolve_skill \
+  --hermes-repo "$TARGET_REPO" \
+  --optimizer-model "$O" \
+  --eval-model "$E" \
+  "$@"
